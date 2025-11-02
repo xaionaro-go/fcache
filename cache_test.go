@@ -96,9 +96,9 @@ func assertReaderBytes(t *testing.T, expected []byte, r io.ReadCloser) {
 	}
 }
 
-func findFileForKey(t *testing.T, dir string, key uint64, mtime int64, expires int64) (path string, err error) {
+func findFileForKey(t *testing.T, dir string, key Key, mtime int64, expires int64) (path string, err error) {
 	t.Helper()
-	shard, name := toFilename(key, mtime, expires, 0)
+	shard, name := toFilename(key.ToHash(), mtime, expires, 0)
 	parts := strings.Split(name, "_")
 	prefix := parts[0] + "_" + parts[1] + "_" + parts[2]
 	shardDir := filepath.Join(dir, shard)
@@ -115,7 +115,7 @@ func findFileForKey(t *testing.T, dir string, key uint64, mtime int64, expires i
 	return "", fmt.Errorf("could not find file with prefix %s in %s", prefix, shardDir)
 }
 
-func readFileForKey(t *testing.T, dir string, key uint64, mtime int64, expires int64) (data []byte, path string) {
+func readFileForKey(t *testing.T, dir string, key Key, mtime int64, expires int64) (data []byte, path string) {
 	t.Helper()
 	file, err := findFileForKey(t, dir, key, mtime, expires)
 	assertNoError(t, err)
@@ -129,20 +129,20 @@ func TestFileCache_toFilename(t *testing.T) {
 	expires := time.Unix(1644519465, 0).UnixMilli()
 	sequence := uint64(1234)
 
-	shard1, name1 := toFilename(1, mtime, expires, sequence)
-	assertString(t, "01", shard1)
-	assertString(t, "1_kzhcf8k8_kzhcfga0_ya", name1)
+	shard1, name1 := toFilename(Key("1").ToHash(), mtime, expires, sequence)
+	assertString(t, "18", shard1)
+	assertString(t, "18d27566bd1ac66b2332d8c54ad43f7bb22079c906d05f491f3f07a28d5c6990_kzhcf8k8_kzhcfga0_ya", name1)
 
-	shard2, name2 := toFilename(123, mtime, 0, 0)
-	assertString(t, "3f", shard2)
-	assertString(t, "3f_kzhcf8k8_+", name2) // with no sequence it should match old format
+	shard2, name2 := toFilename(Key("123").ToHash(), mtime, 0, 0)
+	assertString(t, "f5", shard2)
+	assertString(t, "f5182c34f66c46ba5c185fbad8f71db1c8da173b6f6c4c1bc8ecfcfdd426fd10_kzhcf8k8_+", name2) // with no sequence it should match old format
 }
 
 func TestFileCache_fromFilename(t *testing.T) {
-	key1, mtime1, expires1, sequence1, err1 := fromFilename("1_kzhcf8k8_kzhcfga0")
+	keyHash1, mtime1, expires1, sequence1, err1 := fromFilename("18d27566bd1ac66b2332d8c54ad43f7bb22079c906d05f491f3f07a28d5c6990_kzhcf8k8_kzhcfga0")
 	assertNoError(t, err1)
-	if key1 != 1 {
-		t.Fatal("Expected 1 but got:", key1)
+	if keyHash1 != Key("1").ToHash() {
+		t.Fatal("Expected 1 but got:", keyHash1)
 	}
 	assertInt(t, 1644519455000, mtime1)
 	assertInt(t, 1644519465000, expires1)
@@ -150,10 +150,10 @@ func TestFileCache_fromFilename(t *testing.T) {
 		t.Fatal("Expected 0 but got:", sequence1)
 	}
 
-	key2, mtime2, expires2, sequence2, err2 := fromFilename("3f_kzhcf8k8_+")
+	keyHash2, mtime2, expires2, sequence2, err2 := fromFilename("18d27566bd1ac66b2332d8c54ad43f7bb22079c906d05f491f3f07a28d5c6990_kzhcf8k8_+")
 	assertNoError(t, err2)
-	if key2 != 123 {
-		t.Fatal("Expected 123 but got:", key2)
+	if expected := Key("1").ToHash(); keyHash2 != expected {
+		t.Fatalf("Expected %s but got: %s", expected, keyHash2)
 	}
 	assertInt(t, 1644519455000, mtime2)
 	assertInt(t, 0, expires2)
@@ -161,10 +161,10 @@ func TestFileCache_fromFilename(t *testing.T) {
 		t.Fatal("Expected 0 but got:", sequence2)
 	}
 
-	key3, mtime3, expires3, sequence3, err3 := fromFilename("3f_kzhcf8k8_+_ya")
+	keyHash3, mtime3, expires3, sequence3, err3 := fromFilename("f5182c34f66c46ba5c185fbad8f71db1c8da173b6f6c4c1bc8ecfcfdd426fd10_kzhcf8k8_+_ya")
 	assertNoError(t, err3)
-	if key3 != 123 {
-		t.Fatal("Expected 123 but got:", key3)
+	if expected := Key("123").ToHash(); keyHash3 != expected {
+		t.Fatalf("Expected %s but got: %s", expected, keyHash3)
 	}
 	assertInt(t, 1644519455000, mtime3)
 	assertInt(t, 0, expires3)
@@ -181,15 +181,15 @@ func TestFileCache_fromFilename(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected error but got nil")
 	}
-	_, _, _, _, err = fromFilename("3f_%_+_ya")
+	_, _, _, _, err = fromFilename("18d27566bd1ac66b2332d8c54ad43f7bb22079c906d05f491f3f07a28d5c6990_%_+_ya")
 	if err == nil {
 		t.Fatal("Expected error but got nil")
 	}
-	_, _, _, _, err = fromFilename("3f_kzhcf8k8_$_ya")
+	_, _, _, _, err = fromFilename("18d27566bd1ac66b2332d8c54ad43f7bb22079c906d05f491f3f07a28d5c6990_kzhcf8k8_$_ya")
 	if err == nil {
 		t.Fatal("Expected error but got nil")
 	}
-	_, _, _, _, err = fromFilename("3f_kzhcf8k8_+_|")
+	_, _, _, _, err = fromFilename("18d27566bd1ac66b2332d8c54ad43f7bb22079c906d05f491f3f07a28d5c6990_kzhcf8k8_+_|")
 	if err == nil {
 		t.Fatal("Expected error but got nil")
 	}
@@ -203,7 +203,7 @@ func TestFileCache_Put(t *testing.T) {
 
 	start := time.Now().Add(-time.Millisecond)
 
-	e1, err := c.Put(uint64(1), DATA, 0)
+	e1, err := c.Put(Key("1"), DATA, 0)
 	assertNoError(t, err)
 	if e1.Size != 59 {
 		t.Fatal("Expected size 59 for e1 but got", e1.Size)
@@ -213,7 +213,7 @@ func TestFileCache_Put(t *testing.T) {
 	}
 	assertTime(t, time.Time{}, e1.Expires)
 
-	e2, err := c.Put(uint64(2), DATA, -time.Millisecond)
+	e2, err := c.Put(Key("2"), DATA, -time.Millisecond)
 	assertNoError(t, err)
 	if e2.Size != 59 {
 		t.Fatal("Expected size 59 for e2 but got", e2.Size)
@@ -223,7 +223,7 @@ func TestFileCache_Put(t *testing.T) {
 	}
 	assertTime(t, e2.Mtime.Add(-time.Millisecond), e2.Expires)
 
-	e3, err := c.PutReader(uint64(3), bytes.NewReader(DATA), 10*time.Minute)
+	e3, err := c.PutReader(Key("3"), bytes.NewReader(DATA), 10*time.Minute)
 	assertNoError(t, err)
 	if e3.Size != 59 {
 		t.Fatal("Expected size 59 for e3 but got", e3.Size)
@@ -246,23 +246,23 @@ func TestFileCache_Put(t *testing.T) {
 		Locks:          0,
 	}, c.Stats())
 
-	data1, path1 := readFileForKey(t, dir, 1, e1.Mtime.UnixMilli(), 0)
+	data1, path1 := readFileForKey(t, dir, Key("1"), e1.Mtime.UnixMilli(), 0)
 	if !bytes.Equal(data1, DATA) {
 		t.Fatal("Expected data for e1 got", data1)
 	}
 
-	data2, _ := readFileForKey(t, dir, 2, e2.Mtime.UnixMilli(), e2.Expires.UnixMilli())
+	data2, _ := readFileForKey(t, dir, Key("2"), e2.Mtime.UnixMilli(), e2.Expires.UnixMilli())
 	if !bytes.Equal(data2, DATA) {
 		t.Fatal("Expected data for e2 got", data2)
 	}
 
-	data3, _ := readFileForKey(t, dir, 3, e3.Mtime.UnixMilli(), e3.Expires.UnixMilli())
+	data3, _ := readFileForKey(t, dir, Key("3"), e3.Mtime.UnixMilli(), e3.Expires.UnixMilli())
 	if !bytes.Equal(data3, DATA) {
 		t.Fatal("Expected data for e3 got", data3)
 	}
 
 	newData := []byte("DUMMY")
-	updated1, err := c.Put(1, newData, 123*time.Minute)
+	updated1, err := c.Put(Key("1"), newData, 123*time.Minute)
 	assertNoError(t, err)
 	if updated1.Size != 5 {
 		t.Fatal("Expected size 5 for updated1 but got", updated1.Size)
@@ -272,7 +272,7 @@ func TestFileCache_Put(t *testing.T) {
 	}
 	assertTime(t, updated1.Mtime.Add(123*time.Minute), updated1.Expires)
 
-	updatedData, updatedPath := readFileForKey(t, dir, 1, updated1.Mtime.UnixMilli(), updated1.Expires.UnixMilli())
+	updatedData, updatedPath := readFileForKey(t, dir, Key("1"), updated1.Mtime.UnixMilli(), updated1.Expires.UnixMilli())
 	if !bytes.Equal(updatedData, newData) {
 		t.Fatal("Expected updatedData for updated1 got", updatedData)
 	}
@@ -307,10 +307,10 @@ func TestFileCache_Put_ErrorOnWriteCleanUp(t *testing.T) {
 	c := ci.(*cache)
 
 	key := uint64(1)
-	shard := fmt.Sprintf("%02s", strconv.FormatUint(key, 36))
+	shard := Key("1").ToHash().toShard().String()
 
 	fakeError := errors.New("ohh no something failed")
-	info, err := c.PutReader(key, ReaderFunc(func(p []byte) (n int, err error) {
+	info, err := c.PutReader(Key(fmt.Sprintf("%d", key)), ReaderFunc(func(p []byte) (n int, err error) {
 		return 0, fakeError
 	}), 0)
 	if err != fakeError {
@@ -327,7 +327,7 @@ func TestFileCache_Put_ErrorOnWriteCleanUp(t *testing.T) {
 		t.Fatalf("dir %s should not contain files but found %d", d, len(entries))
 	}
 
-	info, err = c.Has(key)
+	info, err = c.Has(Key(fmt.Sprintf("%d", key)))
 	if err != ErrNotFound {
 		t.Fatal("err should be ErrNotFound but was:", err)
 	}
@@ -335,7 +335,7 @@ func TestFileCache_Put_ErrorOnWriteCleanUp(t *testing.T) {
 		t.Fatal("info should be nil but was:", err)
 	}
 
-	data, info, err := c.Get(key)
+	data, info, err := c.Get(Key(fmt.Sprintf("%d", key)))
 	if err != ErrNotFound {
 		t.Fatal("err should be ErrNotFound but was:", err)
 	}
@@ -367,15 +367,15 @@ func TestFileCache_Has(t *testing.T) {
 	c := ci.(*cache)
 
 	key := uint64(1)
-	putEntry, err := c.Put(key, DATA, 0)
+	putEntry, err := c.Put(Key(fmt.Sprintf("%d", key)), DATA, 0)
 	assertNoError(t, err)
 
-	hasEntry, err := c.Has(key)
+	hasEntry, err := c.Has(Key(fmt.Sprintf("%d", key)))
 	assertNoError(t, err)
 
 	assertStruct(t, putEntry, hasEntry)
 
-	notExisting, err := c.Has(123)
+	notExisting, err := c.Has(Key("123"))
 	if err != ErrNotFound {
 		assertNoError(t, err)
 	}
@@ -406,15 +406,15 @@ func TestFileCache_Get(t *testing.T) {
 	start := time.Now().Add(-time.Millisecond)
 	key := uint64(1)
 
-	data, entry, err := c.Get(key)
+	data, entry, err := c.Get(Key(fmt.Sprintf("%d", key)))
 	if err != ErrNotFound || data != nil || entry != nil {
 		t.Fatalf("Unexpected return for not existing key: %+v, %+v, %+v", data, entry, err)
 	}
 
-	_, err = c.Put(key, DATA, 0)
+	_, err = c.Put(Key(fmt.Sprintf("%d", key)), DATA, 0)
 	assertNoError(t, err)
 
-	data, entry, err = c.Get(key)
+	data, entry, err = c.Get(Key(fmt.Sprintf("%d", key)))
 	assertNoError(t, err)
 	if !bytes.Equal(data, DATA) {
 		t.Fatal("Unexpected data for get", data)
@@ -427,7 +427,7 @@ func TestFileCache_Get(t *testing.T) {
 	}
 	assertTime(t, time.Time{}, entry.Expires)
 
-	r, entry, err := c.GetReader(key)
+	r, entry, err := c.GetReader(Key(fmt.Sprintf("%d", key)))
 	assertNoError(t, err)
 
 	assertReaderBytes(t, DATA, r)
@@ -440,12 +440,12 @@ func TestFileCache_Get(t *testing.T) {
 	}
 	assertTime(t, time.Time{}, entry.Expires)
 
-	_, err = c.Put(2, DATA, 1*time.Millisecond)
+	_, err = c.Put(Key("2"), DATA, 1*time.Millisecond)
 	assertNoError(t, err)
 
 	time.Sleep(2 * time.Millisecond)
 
-	expiredData, expiredEntry, err := c.Get(2)
+	expiredData, expiredEntry, err := c.Get(Key("2"))
 	if err != ErrNotFound || expiredData != nil || expiredEntry != nil {
 		t.Fatalf("Unexpected return for expired key: %+v, %+v, %+v", expiredData, expiredEntry, err)
 	}
@@ -473,7 +473,7 @@ func TestFileCache_GetOrPut(t *testing.T) {
 	start := time.Now().Add(-time.Millisecond)
 	key := uint64(1)
 
-	data, entry1, hit, err := c.GetOrPut(key, 0, FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+	data, entry1, hit, err := c.GetOrPut(Key(fmt.Sprintf("%d", key)), 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
 		n, err := sink.Write(DATA)
 		return int64(n), err
 	}))
@@ -492,7 +492,7 @@ func TestFileCache_GetOrPut(t *testing.T) {
 		t.Fatal("First GetOrPut should not be a cache hit")
 	}
 
-	r, entry2, hit, err := c.GetReaderOrPut(key, 1*time.Hour, FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+	r, entry2, hit, err := c.GetReaderOrPut(Key(fmt.Sprintf("%d", key)), 1*time.Hour, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
 		return 0, errors.New("filler should not have been called")
 	}))
 	assertNoError(t, err)
@@ -535,7 +535,7 @@ func TestFileCache_GetOrPut_OnlyWritesOnce(t *testing.T) {
 		wgDone.Add(1)
 		defer wgDone.Done()
 		t.Log("First GetOrPut")
-		data, _, _, err := c.GetOrPut(1, 0, FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+		data, _, _, err := c.GetOrPut(Key("1"), 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
 			wgStart.Done()
 			lock.Lock()
 			defer lock.Unlock()
@@ -563,7 +563,7 @@ func TestFileCache_GetOrPut_OnlyWritesOnce(t *testing.T) {
 		wgDone.Add(1)
 		defer wgDone.Done()
 		t.Log("Second GetOrPut")
-		data, _, _, err := c.GetOrPut(1, 0, FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+		data, _, _, err := c.GetOrPut(Key("1"), 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
 			t.Log("Second GetOrPut work")
 			return 0, errors.New("filler should not have been called")
 		}))
@@ -604,7 +604,7 @@ func TestFileCache_GetOrPut_OnExpiredEntryOnlyWritesOnce(t *testing.T) {
 	assertNoError(t, err)
 	c := ci.(*cache)
 
-	_, err = c.Put(1, DATA, 1*time.Millisecond)
+	_, err = c.Put(Key("1"), DATA, 1*time.Millisecond)
 	assertNoError(t, err)
 	time.Sleep(2 * time.Millisecond)
 
@@ -618,7 +618,7 @@ func TestFileCache_GetOrPut_OnExpiredEntryOnlyWritesOnce(t *testing.T) {
 		wgDone.Add(1)
 		defer wgDone.Done()
 		t.Log("First GetOrPut")
-		data, _, _, err := c.GetOrPut(1, 0, FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+		data, _, _, err := c.GetOrPut(Key("1"), 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
 			wgStart.Done()
 			lock.Lock()
 			defer lock.Unlock()
@@ -646,7 +646,7 @@ func TestFileCache_GetOrPut_OnExpiredEntryOnlyWritesOnce(t *testing.T) {
 		wgDone.Add(1)
 		defer wgDone.Done()
 		t.Log("Second GetOrPut")
-		data, _, _, err := c.GetOrPut(1, 0, FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+		data, _, _, err := c.GetOrPut(Key("1"), 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
 			t.Log("Second GetOrPut work")
 			return 0, errors.New("filler should not have been called")
 		}))
@@ -697,7 +697,7 @@ func TestFileCache_GetOrPut_OnOtherKeyDoesNotBlock(t *testing.T) {
 		wgDone.Add(1)
 		defer wgDone.Done()
 		t.Log("First GetOrPut")
-		data, _, _, err := c.GetOrPut(1, 0, FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+		data, _, _, err := c.GetOrPut("1", 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
 			wgStart.Done()
 			lock.Lock()
 			defer lock.Unlock()
@@ -725,7 +725,7 @@ func TestFileCache_GetOrPut_OnOtherKeyDoesNotBlock(t *testing.T) {
 	go func() {
 		defer wgSecond.Done()
 		t.Log("Second GetOrPut")
-		data, _, _, err := c.GetOrPut(2, 0, FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+		data, _, _, err := c.GetOrPut("2", 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
 			n, err := sink.Write(DATA)
 			t.Log("Second GetOrPut done")
 			return int64(n), err
@@ -772,7 +772,7 @@ func TestFileCache_GetOrPut_ErrorOnWriteCleanUp(t *testing.T) {
 	shard := fmt.Sprintf("%02s", strconv.FormatUint(key, 36))
 
 	fakeError := errors.New("ohh no something failed")
-	data, info, hit, err := c.GetOrPut(key, 0, FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+	data, info, hit, err := c.GetOrPut(Key(fmt.Sprintf("%d", key)), 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
 		n, err := sink.Write(DATA)
 		return int64(n), fakeError
 	}))
@@ -796,7 +796,7 @@ func TestFileCache_GetOrPut_ErrorOnWriteCleanUp(t *testing.T) {
 		t.Fatalf("dir %s should not contain files but found %d", d, len(entries))
 	}
 
-	info, err = c.Has(key)
+	info, err = c.Has(Key(fmt.Sprintf("%d", key)))
 	if err != ErrNotFound {
 		t.Fatal("err should be ErrNotFound but was:", err)
 	}
@@ -804,7 +804,7 @@ func TestFileCache_GetOrPut_ErrorOnWriteCleanUp(t *testing.T) {
 		t.Fatal("info should be nil but was:", err)
 	}
 
-	data, info, err = c.Get(key)
+	data, info, err = c.Get(Key(fmt.Sprintf("%d", key)))
 	if err != ErrNotFound {
 		t.Fatal("err should be ErrNotFound but was:", err)
 	}
@@ -835,20 +835,20 @@ func TestFileCache_Delete(t *testing.T) {
 	assertNoError(t, err)
 	c := ci.(*cache)
 
-	notExisting, err := c.Delete(1)
+	notExisting, err := c.Delete("1")
 	assertNoError(t, err)
 	if notExisting != nil {
 		t.Fatal("notExisting entry should be nil but was:", notExisting)
 	}
 
-	entry, err := c.Put(1, DATA, 0)
+	entry, err := c.Put("1", DATA, 0)
 	assertNoError(t, err)
 
-	_, p := readFileForKey(t, dir, 1, entry.Mtime.UnixMilli(), 0)
+	_, p := readFileForKey(t, dir, "1", entry.Mtime.UnixMilli(), 0)
 	_, err = os.Stat(p)
 	assertNoError(t, err)
 
-	deletedEntry, err := c.Delete(1)
+	deletedEntry, err := c.Delete("1")
 	assertNoError(t, err)
 
 	assertStruct(t, entry, deletedEntry)
@@ -858,7 +858,7 @@ func TestFileCache_Delete(t *testing.T) {
 		t.Fatal("path does still exist:", p)
 	}
 
-	_, err = c.Has(1)
+	_, err = c.Has("1")
 	if err != ErrNotFound {
 		t.Fatal("Has should respond with ErrNotFound error but was:", err)
 	}
@@ -899,22 +899,22 @@ func TestFileCache_Clear(t *testing.T) {
 	assertNoError(t, err)
 	c := ci.(*cache)
 
-	_, err = c.Put(1, DATA, 0)
+	_, err = c.Put("1", DATA, 0)
 	assertNoError(t, err)
 
-	_, _, err = c.Get(1)
+	_, _, err = c.Get("1")
 	assertNoError(t, err)
 
-	_, err = c.Has(1)
+	_, err = c.Has("1")
 	assertNoError(t, err)
 
-	_, err = c.Put(2, DATA, 0)
+	_, err = c.Put("2", DATA, 0)
 	assertNoError(t, err)
 
-	_, err = c.Delete(2)
+	_, err = c.Delete("2")
 	assertNoError(t, err)
 
-	_, err = c.Put(3, DATA, 0)
+	_, err = c.Put("3", DATA, 0)
 	assertNoError(t, err)
 
 	err = c.Clear(false)
@@ -925,8 +925,8 @@ func TestFileCache_Clear(t *testing.T) {
 	if files != 0 {
 		t.Fatalf("%d files were not removed\n", files)
 	}
-	if dirs != 1296 {
-		t.Fatalf("Expected %d shard dirs but got %d\n", 1296, dirs)
+	if dirs != maxShards {
+		t.Fatalf("Expected %d shard dirs but got %d\n", maxShards, dirs)
 	}
 
 	assertStats(t, Stats{
@@ -942,7 +942,7 @@ func TestFileCache_Clear(t *testing.T) {
 		Locks:          0,
 	}, c.Stats())
 
-	_, err = c.Put(1, DATA, 0)
+	_, err = c.Put("1", DATA, 0)
 	assertNoError(t, err)
 
 	err = c.Clear(true)
@@ -953,8 +953,8 @@ func TestFileCache_Clear(t *testing.T) {
 	if files != 0 {
 		t.Fatalf("%d files were not removed\n", files)
 	}
-	if dirs != 1296 {
-		t.Fatalf("Expected %d shard dirs but got %d\n", 1296, dirs)
+	if dirs != maxShards {
+		t.Fatalf("Expected %d shard dirs but got %d\n", maxShards, dirs)
 	}
 
 	assertStats(t, Stats{
@@ -980,20 +980,20 @@ func TestFileCache_Eviction(t *testing.T) {
 	fakeEvictionTime := time.Now().Add(-1 * time.Minute)
 	c.evictionTime = fakeEvictionTime
 
-	e1, err := c.Put(1, DATA, 0)
+	e1, err := c.Put("1", DATA, 0)
 	assertNoError(t, err)
 
-	_, err = c.Put(2, DATA, 0)
+	_, err = c.Put("2", DATA, 0)
 	assertNoError(t, err)
 
-	e3, err := c.Put(3, DATA, 0)
+	e3, err := c.Put("3", DATA, 0)
 	assertNoError(t, err)
 
-	_, err = c.Put(4, DATA, 0)
+	_, err = c.Put("4", DATA, 0)
 	assertNoError(t, err)
 
 	// protect 2 from eviction by using it
-	_, _, err = c.Get(2)
+	_, _, err = c.Get("2")
 	assertNoError(t, err)
 
 	// give async evict some time to start
@@ -1050,33 +1050,33 @@ func TestFileCache_Eviction(t *testing.T) {
 		Locks:          0,
 	}, stats)
 
-	_, err = c.Has(1)
+	_, err = c.Has("1")
 	if err != ErrNotFound {
 		t.Fatal("entry 1 should have been evicted")
 	}
-	_, err = findFileForKey(t, dir, 1, e1.Mtime.UnixMilli(), 0)
+	_, err = findFileForKey(t, dir, "1", e1.Mtime.UnixMilli(), 0)
 	if err == nil {
 		t.Fatal("entry 1 file was not removed")
 	}
 
-	_, err = c.Has(2)
+	_, err = c.Has(Key("2"))
 	if err != nil {
 		t.Fatal("entry 2 should not have been evicted")
 	}
-	_, err = c.Has(3)
+	_, err = c.Has(Key("3"))
 	if err != ErrNotFound {
 		t.Fatal("entry 3 should have been evicted")
 	}
-	_, err = findFileForKey(t, dir, 3, e3.Mtime.UnixMilli(), 0)
+	_, err = findFileForKey(t, dir, Key("3"), e3.Mtime.UnixMilli(), 0)
 	if err == nil {
 		t.Fatal("entry 3 file was not removed")
 	}
-	_, err = c.Has(4)
+	_, err = c.Has(Key("4"))
 	if err != nil {
 		t.Fatal("entry 4 should not have been evicted")
 	}
 
-	e5, err := c.Put(5, DATA, 1*time.Millisecond)
+	e5, err := c.Put(Key("5"), DATA, 1*time.Millisecond)
 	assertNoError(t, err)
 
 	time.Sleep(2 * time.Millisecond)
@@ -1099,11 +1099,11 @@ func TestFileCache_Eviction(t *testing.T) {
 
 	c.evict()
 
-	_, err = c.Has(5)
+	_, err = c.Has(Key("5"))
 	if err != ErrNotFound {
 		t.Fatal("entry 5 should have been evicted")
 	}
-	_, err = findFileForKey(t, dir, 5, e5.Mtime.UnixMilli(), e5.Expires.UnixMilli())
+	_, err = findFileForKey(t, dir, Key("5"), e5.Mtime.UnixMilli(), e5.Expires.UnixMilli())
 	if err == nil {
 		t.Fatal("entry 5 file was not removed")
 	}
@@ -1130,13 +1130,13 @@ func TestFileCache_EvictionOnPut(t *testing.T) {
 
 	beforeEviction := time.Now().Add(-1 * time.Millisecond)
 
-	e1, err := c.Put(1, DATA, 0)
+	e1, err := c.Put(Key("1"), DATA, 0)
 	assertNoError(t, err)
 
-	e2, err := c.Put(2, DATA, 0)
+	e2, err := c.Put(Key("2"), DATA, 0)
 	assertNoError(t, err)
 
-	_, err = c.Put(3, DATA, 0)
+	_, err = c.Put(Key("3"), DATA, 0)
 	assertNoError(t, err)
 
 	// give async evict some time to finish
@@ -1161,7 +1161,7 @@ func TestFileCache_EvictionOnPut(t *testing.T) {
 
 	beforeEviction = time.Now().Add(-1 * time.Millisecond)
 
-	_, err = c.PutReader(4, bytes.NewReader(DATA), 0)
+	_, err = c.PutReader(Key("4"), bytes.NewReader(DATA), 0)
 	assertNoError(t, err)
 
 	// give async evict some time to finish
@@ -1184,29 +1184,29 @@ func TestFileCache_EvictionOnPut(t *testing.T) {
 		t.Fatalf("evictionTime was not updated: %v", c.evictionTime)
 	}
 
-	_, err = c.Has(1)
+	_, err = c.Has(Key("1"))
 	if err != ErrNotFound {
 		t.Fatal("entry 1 should have been evicted")
 	}
-	_, err = findFileForKey(t, dir, 1, e1.Mtime.UnixMilli(), 0)
+	_, err = findFileForKey(t, dir, Key("1"), e1.Mtime.UnixMilli(), 0)
 	if err == nil {
 		t.Fatal("entry 1 file was not removed")
 	}
 
-	_, err = c.Has(2)
+	_, err = c.Has(Key("2"))
 	if err != ErrNotFound {
 		t.Fatal("entry 2 should have been evicted")
 	}
-	_, err = findFileForKey(t, dir, 2, e2.Mtime.UnixMilli(), 0)
+	_, err = findFileForKey(t, dir, Key("2"), e2.Mtime.UnixMilli(), 0)
 	if err == nil {
 		t.Fatal("entry 2 file was not removed")
 	}
 
-	_, err = c.Has(3)
+	_, err = c.Has(Key("3"))
 	if err != nil {
 		t.Fatal("entry 3 should not have been evicted")
 	}
-	_, err = c.Has(4)
+	_, err = c.Has(Key("4"))
 	if err != nil {
 		t.Fatal("entry 4 should not have been evicted")
 	}
@@ -1218,34 +1218,34 @@ func TestFileCache_Load(t *testing.T) {
 	assertNoError(t, err)
 	c1 := ci1.(*cache)
 
-	e1, err := c1.Put(1, DATA, 0)
+	e1, err := c1.Put(Key("1"), DATA, 0)
 	assertNoError(t, err)
 
-	e2, err := c1.Put(2, DATA, 1*time.Hour)
+	e2, err := c1.Put(Key("2"), DATA, 1*time.Hour)
 	assertNoError(t, err)
 
 	mtime4 := time.Now().Add(-24 * time.Hour)
 	expires4 := time.Now().Add(-1 * time.Hour)
-	shard, name := toFilename(4, mtime4.UnixMilli(), expires4.UnixMilli(), 123)
+	shard, name := toFilename(Key("4").ToHash(), mtime4.UnixMilli(), expires4.UnixMilli(), 123)
 	err = os.MkdirAll(filepath.Join(dir, shard), 0750)
 	assertNoError(t, err)
 	path4 := filepath.Join(dir, shard, name)
 	err = os.WriteFile(path4, DATA, 0640)
 	assertNoError(t, err)
 
-	e3, err := c1.Put(3, DATA, 0)
+	e3, err := c1.Put(Key("3"), DATA, 0)
 	assertNoError(t, err)
 
 	ci2, err := Builder(dir, 1*GB).WithEvictionInterval(1 * time.Hour).Build()
 	assertNoError(t, err)
 	c2 := ci2.(*cache)
 
-	secondE1, err := c2.Has(1)
+	secondE1, err := c2.Has(Key("1"))
 	assertNoError(t, err)
 	e1.Mtime = time.UnixMilli(e1.Mtime.UnixMilli())
 	assertStruct(t, e1, secondE1)
 
-	data, secondE2, err := c2.Get(2)
+	data, secondE2, err := c2.Get(Key("2"))
 	assertNoError(t, err)
 	e2.Mtime = time.UnixMilli(e2.Mtime.UnixMilli())
 	e2.Expires = time.UnixMilli(e2.Expires.UnixMilli())
@@ -1254,12 +1254,12 @@ func TestFileCache_Load(t *testing.T) {
 		t.Fatal("Unexpected data for entry 2", data)
 	}
 
-	secondE3, err := c2.Has(3)
+	secondE3, err := c2.Has(Key("3"))
 	assertNoError(t, err)
 	e3.Mtime = time.UnixMilli(e3.Mtime.UnixMilli())
 	assertStruct(t, e3, secondE3)
 
-	_, err = c2.Has(4)
+	_, err = c2.Has(Key("4"))
 	if err != ErrNotFound {
 		t.Fatal("entry 4 should have been expired", err)
 	}
@@ -1289,7 +1289,7 @@ func TestFileCache_WithFileMode(t *testing.T) {
 	c, err := Builder(dir, 1*MB).WithFileMode(fileMode).Build()
 	assertNoError(t, err)
 
-	_, err = c.Put(1, DATA, 0)
+	_, err = c.Put(Key("1"), DATA, 0)
 	assertNoError(t, err)
 
 	entries, err := os.ReadDir(dir)
@@ -1336,16 +1336,16 @@ func TestFileCache_PutWhileReaderIsOpen(t *testing.T) {
 	c := ci.(*cache)
 
 	key := uint64(1)
-	_, err = c.Put(key, DATA, 0)
+	_, err = c.Put(Key(fmt.Sprintf("%d", key)), DATA, 0)
 	assertNoError(t, err)
 
 	// get and hold open
-	reader, _, err := c.GetReader(key)
+	reader, _, err := c.GetReader(Key(fmt.Sprintf("%d", key)))
 	assertNoError(t, err)
 
 	// update open key
 	update := []byte("other data")
-	_, err = c.Put(key, update, 0)
+	_, err = c.Put(Key(fmt.Sprintf("%d", key)), update, 0)
 	if err != nil && runtime.GOOS == "windows" && err.(*fs.PathError).Op == "remove" && strings.HasPrefix(err.(*fs.PathError).Path, dir) && err.(*fs.PathError).Err.(syscall.Errno) == 32 {
 		// ignore internal/syscall/windows.ERROR_SHARING_VIOLATION(32) and abort test
 		_ = reader.Close()
@@ -1354,7 +1354,7 @@ func TestFileCache_PutWhileReaderIsOpen(t *testing.T) {
 	assertNoError(t, err)
 
 	// fresh get reads updated entry
-	updatedReader, _, err := c.GetReader(key)
+	updatedReader, _, err := c.GetReader(Key(fmt.Sprintf("%d", key)))
 	assertNoError(t, err)
 	assertReaderBytes(t, update, updatedReader)
 
@@ -1372,13 +1372,13 @@ func TestFileCache_evict_ErrorOnFileRemove(t *testing.T) {
 	c.evictionTime = time.Now()
 
 	// insert and wait for expiry
-	_, err = c.Put(1, DATA, 1*time.Millisecond)
+	_, err = c.Put(Key("1"), DATA, 1*time.Millisecond)
 	assertNoError(t, err)
 	time.Sleep(1 * time.Millisecond)
 
 	// modify permissions to trigger error on remove
-	entry := c.getEntry(1)
-	entryPath := c.buildEntryPath(entry.key, entry.mtime, entry.expires, entry.sequence)
+	entry := c.getEntry(Key("1").ToHash())
+	entryPath := c.buildEntryPath(entry.keyHash, entry.mtime, entry.expires, entry.sequence)
 	// prevent deletion on windows
 	f, err := os.Open(entryPath)
 	assertNoError(t, err)
@@ -1452,7 +1452,7 @@ func TestFileCache_addEntry_removeEntry_moveToFront(t *testing.T) {
 
 	validateEntryOrder(t, c, []*cacheEntry{})
 
-	e1 := &cacheEntry{key: 1}
+	e1 := &cacheEntry{keyHash: Key("1").ToHash()}
 	c.addEntry(e1)
 	validateEntryOrder(t, c, []*cacheEntry{e1})
 
@@ -1462,7 +1462,7 @@ func TestFileCache_addEntry_removeEntry_moveToFront(t *testing.T) {
 	c.removeEntry(e1)
 	validateEntryOrder(t, c, []*cacheEntry{})
 
-	e2 := &cacheEntry{key: 2}
+	e2 := &cacheEntry{keyHash: Key("2").ToHash()}
 	c.addEntry(e1)
 	c.addEntry(e2)
 	validateEntryOrder(t, c, []*cacheEntry{e2, e1})
@@ -1476,7 +1476,7 @@ func TestFileCache_addEntry_removeEntry_moveToFront(t *testing.T) {
 	c.removeEntry(e1)
 	validateEntryOrder(t, c, []*cacheEntry{e2})
 
-	e3 := &cacheEntry{key: 3}
+	e3 := &cacheEntry{keyHash: Key("3").ToHash()}
 	c.addEntry(e3)
 	c.addEntry(e1)
 	validateEntryOrder(t, c, []*cacheEntry{e1, e3, e2})
@@ -1487,7 +1487,7 @@ func TestFileCache_addEntry_removeEntry_moveToFront(t *testing.T) {
 	c.removeEntry(e1)
 	validateEntryOrder(t, c, []*cacheEntry{e3, e2})
 
-	e4 := &cacheEntry{key: 4}
+	e4 := &cacheEntry{keyHash: Key("4").ToHash()}
 	c.addEntry(e4)
 	c.addEntry(e1)
 	validateEntryOrder(t, c, []*cacheEntry{e1, e4, e3, e2})
@@ -1514,29 +1514,29 @@ func TestFileCache_Ignore_ErrNotExist(t *testing.T) {
 	assertNoError(t, err)
 	c := ci.(*cache)
 
-	_, err = c.Put(1, DATA, 0)
+	_, err = c.Put(Key("1"), DATA, 0)
 	assertNoError(t, err)
 
-	entry := c.getEntry(1)
-	err = os.Remove(c.buildEntryPath(1, entry.mtime, entry.expires, entry.sequence))
+	entry := c.getEntry(Key("1").ToHash())
+	err = os.Remove(c.buildEntryPath(Key("1").ToHash(), entry.mtime, entry.expires, entry.sequence))
 	assertNoError(t, err)
 
-	_, err = c.Delete(1) // ignores that file is already missing
+	_, err = c.Delete(Key("1")) // ignores that file is already missing
 	assertNoError(t, err)
 
-	_, err = c.Put(1, DATA, 0)
+	_, err = c.Put(Key("1"), DATA, 0)
 	assertNoError(t, err)
-	entry = c.getEntry(1)
-	err = os.Remove(c.buildEntryPath(1, entry.mtime, entry.expires, entry.sequence))
+	entry = c.getEntry(Key("1").ToHash())
+	err = os.Remove(c.buildEntryPath(Key("1").ToHash(), entry.mtime, entry.expires, entry.sequence))
 	assertNoError(t, err)
 	c.clearOrEvictDoingDeletes.Add(1) // simulate evict in progress
 
-	_, _, err = c.Get(1) // ignores not existing file error
+	_, _, err = c.Get(Key("1")) // ignores not existing file error
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Expected ErrNotFound but got %v", err)
 	}
 
-	data, info, hit, err := c.GetOrPut(1, 0, FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+	data, info, hit, err := c.GetOrPut(Key("1"), 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
 		return io.Copy(sink, bytes.NewReader(DATA))
 	}))
 	assertNoError(t, err)

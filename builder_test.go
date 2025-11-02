@@ -21,8 +21,8 @@ func TestBuilder_WithFileMode(t *testing.T) {
 	}
 	shardDirs, err := os.ReadDir(dir)
 	assertNoError(t, err)
-	if len(shardDirs) != 1296 {
-		t.Fatalf("Expected %d shard dirs but got %d\n", 1296, len(shardDirs))
+	if len(shardDirs) != maxShards {
+		t.Fatalf("Expected %d shard dirs but got %d\n", maxShards, len(shardDirs))
 	}
 	for _, shardDir := range shardDirs {
 		if !shardDir.IsDir() {
@@ -50,8 +50,8 @@ func TestBuilder_WithFileMode(t *testing.T) {
 	}
 	shardDirs, err = os.ReadDir(dir)
 	assertNoError(t, err)
-	if len(shardDirs) != 1296 {
-		t.Fatalf("Expected %d shard dirs but got %d\n", 1296, len(shardDirs))
+	if len(shardDirs) != maxShards {
+		t.Fatalf("Expected %d shard dirs but got %d\n", maxShards, len(shardDirs))
 	}
 }
 
@@ -61,7 +61,7 @@ func TestBuilder_WithBackgroundInit(t *testing.T) {
 	c1, err := Builder(dir, 50*MB).WithBackgroundInit(nil).Build()
 	assertNoError(t, err)
 
-	_, err = c1.Put(1, []byte("Hello World"), 0)
+	_, err = c1.Put(Key("1"), []byte("Hello World"), 0)
 	assertNoError(t, err)
 
 	wg := sync.WaitGroup{}

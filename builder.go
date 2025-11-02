@@ -98,7 +98,7 @@ func (b *builder) Build() (Cache, error) {
 	c := &cache{
 		cacheDir:         b.cacheDir,
 		targetSize:       int64(b.targetSize),
-		entries:          make(map[uint64]*cacheEntry),
+		entries:          make(map[KeyHash]*cacheEntry),
 		evictionInterval: b.evictionInterval,
 		dirMode:          dirMode,
 		fileMode:         b.fileMode,

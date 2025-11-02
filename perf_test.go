@@ -26,7 +26,7 @@ func BenchmarkCache_Put_SameKey(b *testing.B) {
 
 	b.Run(fmt.Sprintf("%d_bytes", size), func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, err := cache.Put(key, data, 0)
+			_, err := cache.Put(Key(fmt.Sprintf("%d", key)), data, 0)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -46,14 +46,14 @@ func BenchmarkCache_Get_SameKey(b *testing.B) {
 	data := make([]byte, size)
 	rand.Read(data)
 
-	_, err = cache.Put(key, data, 0)
+	_, err = cache.Put(Key(fmt.Sprintf("%d", key)), data, 0)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	b.Run(fmt.Sprintf("%d_bytes", size), func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _, err := cache.Get(key)
+			_, _, err := cache.Get(Key(fmt.Sprintf("%d", key)))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -73,14 +73,14 @@ func BenchmarkCache_GetOrPut_FreshKey(b *testing.B) {
 	data := make([]byte, size)
 	rand.Read(data)
 
-	_, err = cache.Put(key, data, 0)
+	_, err = cache.Put(Key(fmt.Sprintf("%d", key)), data, 0)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	b.Run(fmt.Sprintf("%d_bytes", size), func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _, _, err := cache.GetOrPut(uint64(i), 0, FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+			_, _, _, err := cache.GetOrPut(Key(fmt.Sprintf("%d", i)), 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
 				written, err = io.Copy(sink, bytes.NewReader(data))
 				return
 			}))
@@ -112,7 +112,7 @@ func runWorkers(b *testing.B, cache Cache, items int64, size Size, workers int, 
 func putFreshKeyWorker(cache Cache, items int64, size Size, workers int, workerId int) error {
 	dataRand := rand.New(rand.NewSource(int64(workerId)))
 	for i := int64(workerId); i < items; i += int64(workers) {
-		_, err := cache.PutReader(uint64(i), io.LimitReader(dataRand, int64(size)), 0)
+		_, err := cache.PutReader(Key(fmt.Sprintf("%d", i)), io.LimitReader(dataRand, int64(size)), 0)
 		if err != nil {
 			return err
 		}
@@ -142,7 +142,7 @@ func BenchmarkCache_Parallel_Put_FreshKey(b *testing.B) {
 
 func getFreshKeyWorker(cache Cache, items int64, _ Size, workers int, workerId int) error {
 	for i := int64(workerId); i < items; i += int64(workers) {
-		_, _, err := cache.Get(uint64(i))
+		_, _, err := cache.Get(Key(fmt.Sprintf("%d", i)))
 		if err != nil {
 			return err
 		}
@@ -177,7 +177,7 @@ func putRandomKeyWorker(cache Cache, items int64, size Size, _ int, workerId int
 
 	for i := int64(0); i < items; i++ {
 		key := keyRand.Int63n(items)
-		_, err := cache.PutReader(uint64(key), io.LimitReader(dataRand, int64(size)), 0)
+		_, err := cache.PutReader(Key(fmt.Sprintf("%d", key)), io.LimitReader(dataRand, int64(size)), 0)
 		if err != nil {
 			return err
 		}
@@ -210,7 +210,7 @@ func getRandomKeyWorker(cache Cache, items int64, _ Size, _ int, workerId int) e
 
 	for i := int64(0); i < items; i++ {
 		key := keyRand.Int63n(items)
-		_, _, err := cache.Get(uint64(key))
+		_, _, err := cache.Get(Key(fmt.Sprintf("%d", key)))
 		if err != nil {
 			return err
 		}
@@ -249,9 +249,9 @@ func randomLoadWorker(cache Cache, items int64, size Size, _ int, workerId int) 
 		var err error
 		switch actionRand.Intn(2) {
 		case 0:
-			_, err = cache.Delete(key)
+			_, err = cache.Delete(Key(fmt.Sprintf("%d", key)))
 		case 1:
-			_, _, _, err = cache.GetOrPut(key, 0, FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+			_, _, _, err = cache.GetOrPut(Key(fmt.Sprintf("%d", key)), 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
 				return io.Copy(sink, io.LimitReader(dataRand, int64(size)))
 			}))
 		default:

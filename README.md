@@ -1,5 +1,5 @@
 # fcache
-![coverage](https://img.shields.io/badge/coverage-90%25-green) [![go-report-card](https://goreportcard.com/badge/github.com/ydylla/fcache)](https://goreportcard.com/report/github.com/ydylla/fcache) [![reference](https://pkg.go.dev/badge/github.com/ydylla/fcache.svg)](https://pkg.go.dev/github.com/ydylla/fcache)
+![coverage](https://img.shields.io/badge/coverage-90%25-green) [![go-report-card](https://goreportcard.com/badge/github.com/xaionaro-go/fcache)](https://goreportcard.com/report/github.com/xaionaro-go/fcache) [![reference](https://pkg.go.dev/badge/github.com/xaionaro-go/fcache.svg)](https://pkg.go.dev/github.com/xaionaro-go/fcache)
 
 fcache is a file based persistent blob cache. It can be used to bring remote files closer to applications.
 
@@ -11,25 +11,24 @@ fcache is a file based persistent blob cache. It can be used to bring remote fil
 * Request coalescing, to atomically query and insert entries and avoid [cache stampedes](https://en.wikipedia.org/wiki/Cache_stampede)
 * Persistent: reloads cache state from disk after restart
 * Usage statistics
-* Bring your own key hashing algorithm (for example [xxHash](https://github.com/cespare/xxhash))
 
 
 ## Installation
 ```shell
-go get github.com/ydylla/fcache
+go get github.com/xaionaro-go/fcache
 ```
 
 ## Usage
-To build a new cache use the [Builder](https://pkg.go.dev/github.com/ydylla/fcache#Builder):
+To build a new cache use the [Builder](https://pkg.go.dev/github.com/xaionaro-go/fcache#Builder):
 ```go
 cache, err := fcache.Builder("/tmp/fcache", 10*fcache.GiB).Build()
 ```
-The main functions are documented at the [Cache](https://pkg.go.dev/github.com/ydylla/fcache#Cache) interface.
+The main functions are documented at the [Cache](https://pkg.go.dev/github.com/xaionaro-go/fcache#Cache) interface.
 
 ## How it Works
 Each cache entry is saved in its own file. On a successful get query the cache responds with a `io.ReadSeekCloser` backed by an `io.File`.
 The caller is responsible for closing the file handle after he is done reading.
-On each insert the old file is removed and a new one is created.
+On each insert the old file is removed, and a new one is created.
 Eviction happens in background after each insert and only if the amount of time specified by the eviction interval has passed.
 
 
@@ -49,8 +48,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/cespare/xxhash/v2"
-	"github.com/ydylla/fcache"
+	"github.com/xaionaro-go/fcache"
 	"io"
 	"time"
 )
@@ -64,7 +62,7 @@ func main() {
 	}
 
 	// prepare test key and data
-	key := xxhash.Sum64String("test")
+	key := fcache.Key("test")
 	data := []byte("Hello World")
 
 	// insert entry without expiration (ttl)
@@ -98,18 +96,15 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/cespare/xxhash/v2"
-	"github.com/ydylla/fcache"
+	"github.com/xaionaro-go/fcache"
 	"io"
 	"net/http"
 )
 
 // download downloads an url at most once, even if called concurrently
 func download(cache fcache.Cache, url string) (reader io.ReadSeekCloser, info *fcache.EntryInfo, hit bool, err error) {
-	// calculate the key
-	key := xxhash.Sum64String(url)
 	// atomically insert & query
-	return cache.GetReaderOrPut(key, 0, fcache.FillerFunc(func(key uint64, sink io.Writer) (written int64, err error) {
+	return cache.GetReaderOrPut(fcache.Key(url), 0, fcache.FillerFunc(func(key fcache.Key, sink io.Writer) (written int64, err error) {
 		fmt.Println("downloading", url)
 		response, err := http.Get(url)
 		if err != nil {
