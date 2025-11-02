@@ -6,28 +6,30 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/xaionaro-go/fcache/key"
 )
 
 // Builder configures & builds a new cache.
 // cacheDir is the base directory of the cache.
 // targetSize is target size of the cache. Depending on the eviction interval and insert load it may grow larger.
-func Builder(cacheDir string, targetSize Size) *builder {
-	return &builder{cacheDir: cacheDir, targetSize: targetSize}
+func Builder[K Key[KH], KH KeyHash, KHP key.HashPtr[KH]](cacheDir string, targetSize Size) *builder[K, KH, KHP] {
+	return &builder[K, KH, KHP]{cacheDir: cacheDir, targetSize: targetSize}
 }
 
-type builder struct {
+type builder[K Key[KH], KH KeyHash, KHP key.HashPtr[KH]] struct {
 	cacheDir           string
 	targetSize         Size
 	evictionConfigured bool
 	evictionInterval   time.Duration
 	fileMode           os.FileMode
 	backgroundInit     bool
-	initCallback       InitCallback
+	initCallback       InitCallback[K, KH]
 }
 
 // WithEvictionInterval configures how much time has to pass between evictions.
 // By default its 10 minutes.
-func (b *builder) WithEvictionInterval(evictionInterval time.Duration) *builder {
+func (b *builder[K, KH, KHP]) WithEvictionInterval(evictionInterval time.Duration) *builder[K, KH, KHP] {
 	b.evictionInterval = evictionInterval
 	b.evictionConfigured = true
 	return b
@@ -36,7 +38,7 @@ func (b *builder) WithEvictionInterval(evictionInterval time.Duration) *builder 
 // WithFileMode configures which file mode is used for the cache files.
 // By default 0600 is used.
 // Remember to also check your umask when you change this.
-func (b *builder) WithFileMode(perm os.FileMode) *builder {
+func (b *builder[K, KH, KHP]) WithFileMode(perm os.FileMode) *builder[K, KH, KHP] {
 	b.fileMode = perm
 	return b
 }
@@ -44,18 +46,18 @@ func (b *builder) WithFileMode(perm os.FileMode) *builder {
 // InitCallback is called after the cache finished restoring all entries from disk.
 // cache is the Cache that was doing the init.
 // err indicates if the init was successful or not.
-type InitCallback func(cache Cache, err error)
+type InitCallback[K Key[KH], KH KeyHash] func(cache Cache[K, KH], err error)
 
 // WithBackgroundInit restores the cache state in background instead of in Build.
 // If initCallback is not nil it will be called once when all cache entries are restored or an error occurred.
-func (b *builder) WithBackgroundInit(initCallback InitCallback) *builder {
+func (b *builder[K, KH, KHP]) WithBackgroundInit(initCallback InitCallback[K, KH]) *builder[K, KH, KHP] {
 	b.backgroundInit = true
 	b.initCallback = initCallback
 	return b
 }
 
 // Build initializes the cache and also loads the state of existing entries from disk.
-func (b *builder) Build() (Cache, error) {
+func (b *builder[K, KH, KHP]) Build() (Cache[K, KH], error) {
 	if b.targetSize <= 0 {
 		return nil, errors.New("targetSize has to be > 0")
 	}
@@ -95,14 +97,14 @@ func (b *builder) Build() (Cache, error) {
 		return nil, fmt.Errorf("failed to remove test file %s: %w", writeTestPath, err)
 	}
 
-	c := &cache{
+	c := &cache[K, KH, KHP]{
 		cacheDir:         b.cacheDir,
 		targetSize:       int64(b.targetSize),
-		entries:          make(map[KeyHash]*cacheEntry),
+		entries:          make(map[KH]*cacheEntry[KH]),
 		evictionInterval: b.evictionInterval,
 		dirMode:          dirMode,
 		fileMode:         b.fileMode,
-		locker:           NewLocker(),
+		locker:           NewLocker[KH](),
 	}
 
 	err = c.createShardDirs()

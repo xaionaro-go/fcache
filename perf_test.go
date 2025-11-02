@@ -14,7 +14,7 @@ import (
 
 func BenchmarkCache_Put_SameKey(b *testing.B) {
 	dir := b.TempDir()
-	cache, err := Builder(dir, 1*GiB).Build()
+	cache, err := Builder[String, Bytes32](dir, 1*GiB).Build()
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func BenchmarkCache_Put_SameKey(b *testing.B) {
 
 	b.Run(fmt.Sprintf("%d_bytes", size), func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, err := cache.Put(Key(fmt.Sprintf("%d", key)), data, 0)
+			_, err := cache.Put(String(fmt.Sprintf("%d", key)), data, 0)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -36,7 +36,7 @@ func BenchmarkCache_Put_SameKey(b *testing.B) {
 
 func BenchmarkCache_Get_SameKey(b *testing.B) {
 	dir := b.TempDir()
-	cache, err := Builder(dir, 1*GiB).Build()
+	cache, err := Builder[String](dir, 1*GiB).Build()
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -46,14 +46,14 @@ func BenchmarkCache_Get_SameKey(b *testing.B) {
 	data := make([]byte, size)
 	rand.Read(data)
 
-	_, err = cache.Put(Key(fmt.Sprintf("%d", key)), data, 0)
+	_, err = cache.Put(String(fmt.Sprintf("%d", key)), data, 0)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	b.Run(fmt.Sprintf("%d_bytes", size), func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _, err := cache.Get(Key(fmt.Sprintf("%d", key)))
+			_, _, err := cache.Get(String(fmt.Sprintf("%d", key)))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -63,7 +63,7 @@ func BenchmarkCache_Get_SameKey(b *testing.B) {
 
 func BenchmarkCache_GetOrPut_FreshKey(b *testing.B) {
 	dir := b.TempDir()
-	cache, err := Builder(dir, 1*GiB).Build()
+	cache, err := Builder[String, Bytes32](dir, 1*GiB).Build()
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -73,14 +73,14 @@ func BenchmarkCache_GetOrPut_FreshKey(b *testing.B) {
 	data := make([]byte, size)
 	rand.Read(data)
 
-	_, err = cache.Put(Key(fmt.Sprintf("%d", key)), data, 0)
+	_, err = cache.Put(String(fmt.Sprintf("%d", key)), data, 0)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	b.Run(fmt.Sprintf("%d_bytes", size), func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _, _, err := cache.GetOrPut(Key(fmt.Sprintf("%d", i)), 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
+			_, _, _, err := cache.GetOrPut(String(fmt.Sprintf("%d", i)), 0, FillerFunc[String, Bytes32](func(key String, sink io.Writer) (written int64, err error) {
 				written, err = io.Copy(sink, bytes.NewReader(data))
 				return
 			}))
@@ -91,7 +91,14 @@ func BenchmarkCache_GetOrPut_FreshKey(b *testing.B) {
 	})
 }
 
-func runWorkers(b *testing.B, cache Cache, items int64, size Size, workers int, work func(cache Cache, items int64, size Size, workers int, workerId int) error) {
+func runWorkers[K Key[KH], KH KeyHash](
+	b *testing.B,
+	cache Cache[K, KH],
+	items int64,
+	size Size,
+	workers int,
+	work func(cache Cache[K, KH], items int64, size Size, workers int, workerId int) error,
+) {
 	wgDone := sync.WaitGroup{}
 
 	for i := 0; i < workers; i++ {
@@ -109,10 +116,16 @@ func runWorkers(b *testing.B, cache Cache, items int64, size Size, workers int, 
 	wgDone.Wait()
 }
 
-func putFreshKeyWorker(cache Cache, items int64, size Size, workers int, workerId int) error {
+func putFreshKeyWorker(
+	cache Cache[String, Bytes32],
+	items int64,
+	size Size,
+	workers int,
+	workerId int,
+) error {
 	dataRand := rand.New(rand.NewSource(int64(workerId)))
 	for i := int64(workerId); i < items; i += int64(workers) {
-		_, err := cache.PutReader(Key(fmt.Sprintf("%d", i)), io.LimitReader(dataRand, int64(size)), 0)
+		_, err := cache.PutReader(String(fmt.Sprintf("%d", i)), io.LimitReader(dataRand, int64(size)), 0)
 		if err != nil {
 			return err
 		}
@@ -130,7 +143,7 @@ func BenchmarkCache_Parallel_Put_FreshKey(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
 			dir := b.TempDir()
-			cache, err := Builder(dir, targetSize).Build()
+			cache, err := Builder[String](dir, targetSize).Build()
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -140,9 +153,9 @@ func BenchmarkCache_Parallel_Put_FreshKey(b *testing.B) {
 	})
 }
 
-func getFreshKeyWorker(cache Cache, items int64, _ Size, workers int, workerId int) error {
+func getFreshKeyWorker(cache Cache[String, Bytes32], items int64, _ Size, workers int, workerId int) error {
 	for i := int64(workerId); i < items; i += int64(workers) {
-		_, _, err := cache.Get(Key(fmt.Sprintf("%d", i)))
+		_, _, err := cache.Get(String(fmt.Sprintf("%d", i)))
 		if err != nil {
 			return err
 		}
@@ -160,7 +173,7 @@ func BenchmarkCache_Parallel_Get_FreshKey(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
 			dir := b.TempDir()
-			cache, err := Builder(dir, targetSize).Build()
+			cache, err := Builder[String](dir, targetSize).Build()
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -171,13 +184,13 @@ func BenchmarkCache_Parallel_Get_FreshKey(b *testing.B) {
 	})
 }
 
-func putRandomKeyWorker(cache Cache, items int64, size Size, _ int, workerId int) error {
+func putRandomKeyWorker(cache Cache[String, Bytes32], items int64, size Size, _ int, workerId int) error {
 	keyRand := rand.New(rand.NewSource(int64(workerId)))
 	dataRand := rand.New(rand.NewSource(int64(workerId)))
 
 	for i := int64(0); i < items; i++ {
 		key := keyRand.Int63n(items)
-		_, err := cache.PutReader(Key(fmt.Sprintf("%d", key)), io.LimitReader(dataRand, int64(size)), 0)
+		_, err := cache.PutReader(String(fmt.Sprintf("%d", key)), io.LimitReader(dataRand, int64(size)), 0)
 		if err != nil {
 			return err
 		}
@@ -195,7 +208,7 @@ func BenchmarkCache_Parallel_Put_RandomKey(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
 			dir := b.TempDir()
-			cache, err := Builder(dir, targetSize).Build()
+			cache, err := Builder[String](dir, targetSize).Build()
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -205,12 +218,12 @@ func BenchmarkCache_Parallel_Put_RandomKey(b *testing.B) {
 	})
 }
 
-func getRandomKeyWorker(cache Cache, items int64, _ Size, _ int, workerId int) error {
+func getRandomKeyWorker(cache Cache[String, Bytes32], items int64, _ Size, _ int, workerId int) error {
 	keyRand := rand.New(rand.NewSource(int64(workerId)))
 
 	for i := int64(0); i < items; i++ {
 		key := keyRand.Int63n(items)
-		_, _, err := cache.Get(Key(fmt.Sprintf("%d", key)))
+		_, _, err := cache.Get(String(fmt.Sprintf("%d", key)))
 		if err != nil {
 			return err
 		}
@@ -228,7 +241,7 @@ func BenchmarkCache_Parallel_Get_RandomKey(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
 			dir := b.TempDir()
-			cache, err := Builder(dir, targetSize).Build()
+			cache, err := Builder[String](dir, targetSize).Build()
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -239,7 +252,7 @@ func BenchmarkCache_Parallel_Get_RandomKey(b *testing.B) {
 	})
 }
 
-func randomLoadWorker(cache Cache, items int64, size Size, _ int, workerId int) error {
+func randomLoadWorker(cache Cache[String, Bytes32], items int64, size Size, _ int, workerId int) error {
 	keyRand := rand.New(rand.NewSource(int64(workerId)))
 	dataRand := rand.New(rand.NewSource(int64(workerId)))
 	actionRand := rand.New(rand.NewSource(int64(workerId)))
@@ -249,9 +262,9 @@ func randomLoadWorker(cache Cache, items int64, size Size, _ int, workerId int) 
 		var err error
 		switch actionRand.Intn(2) {
 		case 0:
-			_, err = cache.Delete(Key(fmt.Sprintf("%d", key)))
+			_, err = cache.Delete(String(fmt.Sprintf("%d", key)))
 		case 1:
-			_, _, _, err = cache.GetOrPut(Key(fmt.Sprintf("%d", key)), 0, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
+			_, _, _, err = cache.GetOrPut(String(fmt.Sprintf("%d", key)), 0, FillerFunc[String, Bytes32](func(key String, sink io.Writer) (written int64, err error) {
 				return io.Copy(sink, io.LimitReader(dataRand, int64(size)))
 			}))
 		default:
@@ -274,7 +287,7 @@ func BenchmarkCache_Parallel_Random_Load(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
 			dir := b.TempDir()
-			cache, err := Builder(dir, targetSize).Build()
+			cache, err := Builder[String](dir, targetSize).Build()
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -339,7 +352,7 @@ func BenchmarkCache_MemoryUsage(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
 			dir := b.TempDir()
-			cache, err := Builder(dir, targetSize).Build()
+			cache, err := Builder[String](dir, targetSize).Build()
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -360,7 +373,7 @@ func BenchmarkCache_loadEntries(b *testing.B) {
 	workers := 5
 
 	dir := b.TempDir()
-	cache, err := Builder(dir, targetSize).Build()
+	cache, err := Builder[String](dir, targetSize).Build()
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -369,7 +382,7 @@ func BenchmarkCache_loadEntries(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_, err := Builder(dir, targetSize).Build()
+		_, err := Builder[String](dir, targetSize).Build()
 		if err != nil {
 			b.Fatal(err)
 		}

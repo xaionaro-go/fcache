@@ -29,9 +29,9 @@ func expectDone(t *testing.T, chDone chan struct{}, msg string) {
 }
 
 func TestLockerLock(t *testing.T) {
-	l := NewLocker()
-	l.Lock(Key("1").ToHash())
-	holder := l.locks[Key("1").ToHash()]
+	l := NewLocker[Bytes32]()
+	l.Lock(String("1").ToHash())
+	holder := l.locks[String("1").ToHash()]
 
 	if holder.users != 1 {
 		t.Fatalf("expected users to be 1, got :%d", holder.users)
@@ -42,7 +42,7 @@ func TestLockerLock(t *testing.T) {
 
 	chDone := make(chan struct{})
 	go func() {
-		l.Lock(Key("1").ToHash())
+		l.Lock(String("1").ToHash())
 		close(chDone)
 	}()
 
@@ -64,7 +64,7 @@ func TestLockerLock(t *testing.T) {
 
 	expectNotDone(t, chDone, "lock should not have returned while it was still held")
 
-	l.Unlock(Key("1").ToHash())
+	l.Unlock(String("1").ToHash())
 
 	expectDone(t, chDone, "lock should have completed")
 
@@ -77,10 +77,10 @@ func TestLockerLock(t *testing.T) {
 }
 
 func TestLockerUnlock(t *testing.T) {
-	l := NewLocker()
+	l := NewLocker[Bytes32]()
 
-	l.Lock(Key("1").ToHash())
-	l.Unlock(Key("1").ToHash())
+	l.Lock(String("1").ToHash())
+	l.Unlock(String("1").ToHash())
 
 	if l.Size() != 0 {
 		t.Fatalf("expected size to be 0, got: %d", l.Size())
@@ -88,7 +88,7 @@ func TestLockerUnlock(t *testing.T) {
 
 	chDone := make(chan struct{})
 	go func() {
-		l.Lock(Key("1").ToHash())
+		l.Lock(String("1").ToHash())
 		close(chDone)
 	}()
 
@@ -100,73 +100,73 @@ func TestLockerUnlock(t *testing.T) {
 }
 
 func TestLockerUpgrade(t *testing.T) {
-	l := NewLocker()
+	l := NewLocker[Bytes32]()
 	chDone := make(chan struct{})
 
-	l.RLock(Key("1").ToHash())
-	l.RLock(Key("1").ToHash())
+	l.RLock(String("1").ToHash())
+	l.RLock(String("1").ToHash())
 	go func() {
-		l.Upgrade(Key("1").ToHash())
+		l.Upgrade(String("1").ToHash())
 		chDone <- struct{}{}
 	}()
 	expectNotDone(t, chDone, "RLock prevents Upgrade")
 
 	// double Upgrade dead-locks.
-	if l.Upgrade(Key("1").ToHash()) {
+	if l.Upgrade(String("1").ToHash()) {
 		t.Error("Upgrade dead-lock")
 	}
 
-	l.RUnlock(Key("1").ToHash())
+	l.RUnlock(String("1").ToHash())
 	expectDone(t, chDone, "RUnlock enables Upgrade")
 
 	go func() {
-		l.RLock(Key("1").ToHash())
+		l.RLock(String("1").ToHash())
 		chDone <- struct{}{}
 	}()
 	expectNotDone(t, chDone, "Upgraded mutex prevents RLock")
 
-	l.Unlock(Key("1").ToHash())
+	l.Unlock(String("1").ToHash())
 	expectDone(t, chDone, "Unlock enables RLock")
 
 	// Upgrade is given priority to Lock.
 	go func() {
-		l.Lock(Key("1").ToHash())
+		l.Lock(String("1").ToHash())
 		chDone <- struct{}{}
 	}()
 	expectNotDone(t, chDone, "RLock prevents Lock")
 
-	if !l.Upgrade(Key("1").ToHash()) {
+	if !l.Upgrade(String("1").ToHash()) {
 		t.Error("failed to Upgrade")
 	}
 
 	expectNotDone(t, chDone, "Upgrade is given priority to Lock")
 
-	l.Unlock(Key("1").ToHash())
+	l.Unlock(String("1").ToHash())
 
 	expectDone(t, chDone, "Unlock enables Lock")
 }
 
 func TestLockerLockTwoKeys(t *testing.T) {
-	l := NewLocker()
-	l.Lock(Key("1").ToHash())
+	l := NewLocker[Bytes32]()
+	l.Lock(String("1").ToHash())
 
 	if l.Size() != 1 {
 		t.Fatalf("expected size to be 1, got: %d", l.Size())
 	}
 
-	l.Lock(Key("2").ToHash())
+	l.Lock(String("2").ToHash())
 
 	if l.Size() != 2 {
 		t.Fatalf("expected size to be 2, got: %d", l.Size())
 	}
 
-	l.Unlock(Key("1").ToHash())
+	l.Unlock(String("1").ToHash())
 
 	if l.Size() != 1 {
 		t.Fatalf("expected size to be 1, got: %d", l.Size())
 	}
 
-	l.Unlock(Key("2").ToHash())
+	l.Unlock(String("2").ToHash())
 
 	if l.Size() != 0 {
 		t.Fatalf("expected size to be 0, got: %d", l.Size())
@@ -174,7 +174,7 @@ func TestLockerLockTwoKeys(t *testing.T) {
 }
 
 func TestLockerConcurrency(t *testing.T) {
-	l := NewLocker()
+	l := NewLocker[Bytes32]()
 
 	expectedWrites := 0
 	writes := 0
@@ -189,15 +189,15 @@ func TestLockerConcurrency(t *testing.T) {
 		go func(r int) {
 			defer wg.Done()
 			if r == 0 {
-				l.Lock(Key("1").ToHash())
+				l.Lock(String("1").ToHash())
 				writes += 1
-				defer l.Unlock(Key("1").ToHash())
+				defer l.Unlock(String("1").ToHash())
 			} else {
-				l.RLock(Key("1").ToHash())
-				defer l.RUnlock(Key("1").ToHash())
+				l.RLock(String("1").ToHash())
+				defer l.RUnlock(String("1").ToHash())
 			}
 			s := time.Now()
-			for time.Now().Sub(s) < 1*time.Millisecond {
+			for time.Since(s) < 1*time.Millisecond {
 				// busy waiting, with time.Sleep it takes way longer for some reason
 			}
 		}(r)
@@ -215,7 +215,7 @@ func TestLockerConcurrency(t *testing.T) {
 		t.Fatal("timeout waiting for locks to complete")
 	}
 
-	if holder, exists := l.locks[Key("1").ToHash()]; exists {
+	if holder, exists := l.locks[String("1").ToHash()]; exists {
 		t.Fatalf("lock should not exist: %v", holder)
 	}
 
@@ -225,33 +225,33 @@ func TestLockerConcurrency(t *testing.T) {
 }
 
 func BenchmarkLocker(b *testing.B) {
-	l := NewLocker()
+	l := NewLocker[Bytes32]()
 	for i := 0; i < b.N; i++ {
-		l.Lock(Key("1").ToHash())
-		l.Unlock(Key("1").ToHash())
+		l.Lock(String("1").ToHash())
+		l.Unlock(String("1").ToHash())
 	}
 }
 
 func BenchmarkLockerParallel(b *testing.B) {
-	l := NewLocker()
+	l := NewLocker[Bytes32]()
 	b.SetParallelism(128)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			l.Lock(Key("1").ToHash())
-			l.Unlock(Key("1").ToHash())
+			l.Lock(String("1").ToHash())
+			l.Unlock(String("1").ToHash())
 		}
 	})
 }
 
 func BenchmarkLockerMoreKeys(b *testing.B) {
-	l := NewLocker()
+	l := NewLocker[Bytes32]()
 	b.SetParallelism(128)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			k := uint64(rand.Intn(64))
-			l.Lock(Key(fmt.Sprintf("%d", k)).ToHash())
+			l.Lock(String(fmt.Sprintf("%d", k)).ToHash())
 			time.Sleep(5 * time.Millisecond)
-			l.Unlock(Key(fmt.Sprintf("%d", k)).ToHash())
+			l.Unlock(String(fmt.Sprintf("%d", k)).ToHash())
 		}
 	})
 }

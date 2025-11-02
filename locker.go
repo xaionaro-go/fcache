@@ -6,10 +6,10 @@ import (
 )
 
 // Locker provides a key based locking mechanism
-type Locker struct {
+type Locker[KH KeyHash] struct {
 	holderPool sync.Pool
 	mu         sync.Mutex
-	locks      map[KeyHash]*lockHolder
+	locks      map[KH]*lockHolder
 }
 
 type lockHolder struct {
@@ -19,14 +19,14 @@ type lockHolder struct {
 }
 
 // NewLocker creates a new Locker ready to be used
-func NewLocker() *Locker {
-	return &Locker{
+func NewLocker[KH KeyHash]() *Locker[KH] {
+	return &Locker[KH]{
 		holderPool: sync.Pool{New: func() any { return new(lockHolder) }},
-		locks:      make(map[KeyHash]*lockHolder),
+		locks:      make(map[KH]*lockHolder),
 	}
 }
 
-func (l *Locker) prepareToLock(key KeyHash) *lockHolder {
+func (l *Locker[KH]) prepareToLock(key KH) *lockHolder {
 	l.mu.Lock()
 
 	holder, exists := l.locks[key]
@@ -42,7 +42,7 @@ func (l *Locker) prepareToLock(key KeyHash) *lockHolder {
 }
 
 // Lock locks a mutex with the given key for writing. If no mutex for that key exists it is created.
-func (l *Locker) Lock(key KeyHash) {
+func (l *Locker[KH]) Lock(key KH) {
 	holder := l.prepareToLock(key)
 lock:
 	holder.lock.Lock()
@@ -54,7 +54,7 @@ lock:
 }
 
 // RLock locks a mutex with the given key for reading. If no mutex for that key exists it is created.
-func (l *Locker) RLock(key KeyHash) {
+func (l *Locker[KH]) RLock(key KH) {
 	holder := l.prepareToLock(key)
 	holder.lock.RLock()
 }
@@ -62,7 +62,7 @@ func (l *Locker) RLock(key KeyHash) {
 // Upgrade converts a read lock to a write lock for the given key.
 // If the upgrade would deadlock or is not possible it returns false.
 // Inspired by https://github.com/kawasin73/umutex
-func (l *Locker) Upgrade(key KeyHash) (success bool) {
+func (l *Locker[KH]) Upgrade(key KH) (success bool) {
 	l.mu.Lock()
 	holder, exists := l.locks[key]
 	if exists {
@@ -80,7 +80,7 @@ func (l *Locker) Upgrade(key KeyHash) (success bool) {
 	return success
 }
 
-func (l *Locker) prepareToUnlock(key KeyHash) *sync.RWMutex {
+func (l *Locker[KH]) prepareToUnlock(key KH) *sync.RWMutex {
 	l.mu.Lock()
 
 	holder, exists := l.locks[key]
@@ -101,7 +101,7 @@ func (l *Locker) prepareToUnlock(key KeyHash) *sync.RWMutex {
 }
 
 // Unlock unlocks the mutex with the given key
-func (l *Locker) Unlock(key KeyHash) {
+func (l *Locker[KH]) Unlock(key KH) {
 	lock := l.prepareToUnlock(key)
 	if lock != nil {
 		lock.Unlock()
@@ -109,7 +109,7 @@ func (l *Locker) Unlock(key KeyHash) {
 }
 
 // RUnlock unlocks the mutex with the given key
-func (l *Locker) RUnlock(key KeyHash) {
+func (l *Locker[KH]) RUnlock(key KH) {
 	lock := l.prepareToUnlock(key)
 	if lock != nil {
 		lock.RUnlock()
@@ -117,7 +117,7 @@ func (l *Locker) RUnlock(key KeyHash) {
 }
 
 // Size returns the number of internal locks
-func (l *Locker) Size() int {
+func (l *Locker[KH]) Size() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.locks)

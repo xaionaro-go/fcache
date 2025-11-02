@@ -48,21 +48,22 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/xaionaro-go/fcache"
 	"io"
 	"time"
+
+	"github.com/xaionaro-go/fcache"
 )
 
 func main() {
 	// build a new cache
-	cache, err := fcache.Builder("/tmp/fcache", 10*fcache.GiB).Build()
+	cache, err := fcache.Builder[fcache.String]("/tmp/fcache", 10*fcache.GiB).Build()
 	if err != nil {
 		fmt.Println("builder failed to initialize the cache:", err)
 		return
 	}
 
 	// prepare test key and data
-	key := fcache.Key("test")
+	key := fcache.String("test")
 	data := []byte("Hello World")
 
 	// insert entry without expiration (ttl)
@@ -96,15 +97,16 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/xaionaro-go/fcache"
 	"io"
 	"net/http"
+
+	"github.com/xaionaro-go/fcache"
 )
 
 // download downloads an url at most once, even if called concurrently
 func download(cache fcache.Cache, url string) (reader io.ReadSeekCloser, info *fcache.EntryInfo, hit bool, err error) {
 	// atomically insert & query
-	return cache.GetReaderOrPut(fcache.Key(url), 0, fcache.FillerFunc(func(key fcache.Key, sink io.Writer) (written int64, err error) {
+	return cache.GetReaderOrPut(fcache.String(url), 0, fcache.FillerFunc(func(key fcache.String, sink io.Writer) (written int64, err error) {
 		fmt.Println("downloading", url)
 		response, err := http.Get(url)
 		if err != nil {
@@ -121,7 +123,7 @@ func download(cache fcache.Cache, url string) (reader io.ReadSeekCloser, info *f
 
 func main() {
 	// build a new cache
-	cache, err := fcache.Builder("/tmp/fcache", 10*fcache.GiB).Build()
+	cache, err := fcache.Builder[fcache.String]("/tmp/fcache", 10*fcache.GiB).Build()
 	if err != nil {
 		fmt.Println("builder failed to initialize the cache:", err)
 		return

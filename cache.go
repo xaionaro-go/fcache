@@ -13,27 +13,29 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/xaionaro-go/fcache/key"
 )
 
-type cacheEntry struct {
-	keyHash  KeyHash
+type cacheEntry[KH KeyHash] struct {
+	keyHash  KH
 	sequence uint64
 	size     int64
 	mtime    int64
 	expires  int64
-	prev     *cacheEntry
-	next     *cacheEntry
+	prev     *cacheEntry[KH]
+	next     *cacheEntry[KH]
 }
 
-func (e *cacheEntry) isExpired() bool {
+func (e *cacheEntry[KH]) isExpired() bool {
 	return e.expires > 0 && time.Now().UnixMilli() > e.expires
 }
 
-func (e *cacheEntry) isValid() bool {
+func (e *cacheEntry[KH]) isValid() bool {
 	return !e.isExpired()
 }
 
-func (e *cacheEntry) Info() *EntryInfo {
+func (e *cacheEntry[KH]) Info() *EntryInfo {
 	info := &EntryInfo{Size: e.size, Mtime: time.UnixMilli(e.mtime)}
 	if e.expires > 0 {
 		info.Expires = time.UnixMilli(e.expires)
@@ -41,7 +43,7 @@ func (e *cacheEntry) Info() *EntryInfo {
 	return info
 }
 
-type cache struct {
+type cache[K Key[KH], KH KeyHash, KHP key.HashPtr[KH]] struct {
 	cacheDir   string
 	targetSize int64
 	dirMode    os.FileMode
@@ -57,10 +59,10 @@ type cache struct {
 
 	sequence atomic.Uint64
 	lock     sync.RWMutex
-	entries  map[KeyHash]*cacheEntry
-	first    *cacheEntry
-	last     *cacheEntry
-	locker   *Locker
+	entries  map[KH]*cacheEntry[KH]
+	first    *cacheEntry[KH]
+	last     *cacheEntry[KH]
+	locker   *Locker[KH]
 
 	evictionLock     sync.RWMutex
 	evictionInterval time.Duration
@@ -71,9 +73,9 @@ type cache struct {
 	clearOrEvictDoingDeletes atomic.Int32
 }
 
-var _ Cache = (*cache)(nil)
+var _ Cache[String, Bytes32] = (*cache[String, Bytes32, *Bytes32])(nil)
 
-func (c *cache) Stats() Stats {
+func (c *cache[K, KH, KHP]) Stats() Stats {
 	stats := Stats{
 		Has:     c.has.Load(),
 		Gets:    c.gets.Load(),
@@ -97,7 +99,7 @@ func (c *cache) Stats() Stats {
 	return stats
 }
 
-func (c *cache) Has(key Key) (*EntryInfo, error) {
+func (c *cache[K, KH, KHP]) Has(key K) (*EntryInfo, error) {
 	keyHash := key.ToHash()
 	c.has.Add(1)
 
@@ -117,18 +119,23 @@ func (c *cache) Has(key Key) (*EntryInfo, error) {
 	return nil, ErrNotFound
 }
 
-func (c *cache) Put(key Key, val []byte, ttl time.Duration) (*EntryInfo, error) {
+func (c *cache[K, KH, KHP]) Put(key K, val []byte, ttl time.Duration) (*EntryInfo, error) {
 	return c.PutReader(key, bytes.NewReader(val), ttl)
 }
 
-func (c *cache) PutReader(key Key, r io.Reader, ttl time.Duration) (*EntryInfo, error) {
+func (c *cache[K, KH, KHP]) PutReader(key K, r io.Reader, ttl time.Duration) (*EntryInfo, error) {
 	keyHash := key.ToHash()
 	c.locker.Lock(keyHash)
 	defer c.locker.Unlock(keyHash)
 
-	entry, _, err := c.putEntry(key, ttl, false, FillerFunc(func(key Key, sink io.Writer) (written int64, err error) {
-		return io.Copy(sink, r)
-	}))
+	entry, _, err := c.putEntry(
+		key,
+		ttl,
+		false,
+		FillerFunc[K, KH](func(key K, sink io.Writer) (written int64, err error) {
+			return io.Copy(sink, r)
+		}),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +143,7 @@ func (c *cache) PutReader(key Key, r io.Reader, ttl time.Duration) (*EntryInfo, 
 	return entry.Info(), nil
 }
 
-func (c *cache) Get(key Key) ([]byte, *EntryInfo, error) {
+func (c *cache[K, KH, KHP]) Get(key K) ([]byte, *EntryInfo, error) {
 	r, info, err := c.GetReader(key)
 	if err != nil {
 		return nil, info, err
@@ -152,7 +159,7 @@ func (c *cache) Get(key Key) ([]byte, *EntryInfo, error) {
 	return data, info, nil
 }
 
-func (c *cache) GetReader(key Key) (io.ReadSeekCloser, *EntryInfo, error) {
+func (c *cache[K, KH, KHP]) GetReader(key K) (io.ReadSeekCloser, *EntryInfo, error) {
 	keyHash := key.ToHash()
 	entry := c.getEntry(keyHash)
 	if entry == nil {
@@ -179,7 +186,11 @@ func (c *cache) GetReader(key Key) (io.ReadSeekCloser, *EntryInfo, error) {
 	return f, entry.Info(), nil
 }
 
-func (c *cache) GetOrPut(key Key, ttl time.Duration, filler Filler) (data []byte, info *EntryInfo, hit bool, err error) {
+func (c *cache[K, KH, KHP]) GetOrPut(
+	key K,
+	ttl time.Duration,
+	filler Filler[K, KH],
+) (data []byte, info *EntryInfo, hit bool, err error) {
 	r, info, hit, err := c.GetReaderOrPut(key, ttl, filler)
 	if err != nil {
 		return nil, info, hit, err
@@ -195,7 +206,11 @@ func (c *cache) GetOrPut(key Key, ttl time.Duration, filler Filler) (data []byte
 	return data, info, hit, nil
 }
 
-func (c *cache) GetReaderOrPut(key Key, ttl time.Duration, filler Filler) (r io.ReadSeekCloser, info *EntryInfo, hit bool, err error) {
+func (c *cache[K, KH, KHP]) GetReaderOrPut(
+	key K,
+	ttl time.Duration,
+	filler Filler[K, KH],
+) (r io.ReadSeekCloser, info *EntryInfo, hit bool, err error) {
 retry:
 	keyHash := key.ToHash()
 	c.locker.RLock(keyHash)
@@ -240,7 +255,7 @@ put:
 	return r, entry.Info(), false, nil
 }
 
-func (c *cache) Delete(key Key) (*EntryInfo, error) {
+func (c *cache[K, KH, KHP]) Delete(key K) (*EntryInfo, error) {
 	keyHash := key.ToHash()
 
 	c.locker.Lock(keyHash)
@@ -267,11 +282,11 @@ func (c *cache) Delete(key Key) (*EntryInfo, error) {
 	return nil, nil
 }
 
-func (c *cache) Clear(resetStats bool) error {
+func (c *cache[K, KH, KHP]) Clear(resetStats bool) error {
 	c.lock.Lock()
 	deletedEntries := c.entries
 	c.deletes.Add(int64(len(c.entries)))
-	c.entries = make(map[KeyHash]*cacheEntry)
+	c.entries = make(map[KH]*cacheEntry[KH])
 	c.usedSize = 0
 	c.lock.Unlock()
 
@@ -311,9 +326,9 @@ func (c *cache) Clear(resetStats bool) error {
 }
 
 // createShardDirs creates all possible shard dirs
-func (c *cache) createShardDirs() error {
-	for i := 0; i < maxShards; i++ {
-		shardDir := filepath.Join(c.cacheDir, shard(i).String())
+func (c *cache[K, KH, KHP]) createShardDirs() error {
+	for i := 0; i < key.MaxShards; i++ {
+		shardDir := filepath.Join(c.cacheDir, key.Shard(i).String())
 		err := os.MkdirAll(shardDir, c.dirMode)
 		if err != nil {
 			return fmt.Errorf("failed to create shard dir %s: %w", shardDir, err)
@@ -322,12 +337,12 @@ func (c *cache) createShardDirs() error {
 	return nil
 }
 
-func (c *cache) buildEntryPath(keyHash KeyHash, mtime int64, expires int64, sequence uint64) string {
+func (c *cache[K, KH, KHP]) buildEntryPath(keyHash KH, mtime int64, expires int64, sequence uint64) string {
 	shard, name := toFilename(keyHash, mtime, expires, sequence)
 	return filepath.Join(c.cacheDir, shard, name)
 }
 
-func (c *cache) moveToFront(entry *cacheEntry) {
+func (c *cache[K, KH, KHP]) moveToFront(entry *cacheEntry[KH]) {
 	if c.first != entry {
 		entry.prev.next = entry.next
 		if entry.next != nil {
@@ -345,7 +360,7 @@ func (c *cache) moveToFront(entry *cacheEntry) {
 	}
 }
 
-func (c *cache) removeEntry(entry *cacheEntry) {
+func (c *cache[K, KH, KHP]) removeEntry(entry *cacheEntry[KH]) {
 	if entry.prev != nil {
 		entry.prev.next = entry.next
 	}
@@ -366,7 +381,7 @@ func (c *cache) removeEntry(entry *cacheEntry) {
 	c.usedSize -= entry.size
 }
 
-func (c *cache) addEntry(entry *cacheEntry) {
+func (c *cache[K, KH, KHP]) addEntry(entry *cacheEntry[KH]) {
 	entry.next = c.first
 	if c.first != nil {
 		c.first.prev = entry
@@ -380,7 +395,7 @@ func (c *cache) addEntry(entry *cacheEntry) {
 	c.usedSize += entry.size
 }
 
-func (c *cache) getEntry(keyHash KeyHash) *cacheEntry {
+func (c *cache[K, KH, KHP]) getEntry(keyHash KH) *cacheEntry[KH] {
 	c.gets.Add(1)
 
 	c.lock.Lock()
@@ -395,14 +410,14 @@ func (c *cache) getEntry(keyHash KeyHash) *cacheEntry {
 	return nil
 }
 
-func toFilename(keyHash KeyHash, mtime int64, expires int64, sequence uint64) (string, string) {
+func toFilename[KH KeyHash](keyHash KH, mtime int64, expires int64, sequence uint64) (string, string) {
 	var expiresStr string
 	if expires == 0 {
 		expiresStr = "+"
 	} else {
 		expiresStr = strconv.FormatInt(expires, 36)
 	}
-	shard := keyHash.toShard().String()
+	shard := keyHash.ToShard().String()
 	name := keyHash.String() + "_" + strconv.FormatInt(mtime, 36) + "_" + expiresStr
 	if sequence > 0 {
 		name += "_" + strconv.FormatUint(sequence, 36)
@@ -410,13 +425,14 @@ func toFilename(keyHash KeyHash, mtime int64, expires int64, sequence uint64) (s
 	return shard, name
 }
 
-func fromFilename(filename string) (keyHash KeyHash, mtime int64, expires int64, sequence uint64, err error) {
+func fromFilename[KH KeyHash, KHP key.HashPtr[KH]](filename string) (keyHash KH, mtime int64, expires int64, sequence uint64, err error) {
 	parts := strings.Split(filename, "_")
 	if len(parts) != 3 && len(parts) != 4 {
 		return keyHash, mtime, expires, sequence, fmt.Errorf("%s should contain 4 underscore symbols but has %d", filename, len(parts))
 	}
 
-	keyHash, err = keyHashFromString(parts[0])
+	khPtr := KHP(&keyHash)
+	err = khPtr.SetFromString(parts[0])
 	if err != nil {
 		return keyHash, mtime, expires, sequence, fmt.Errorf("failed to restore key hash from %s: %w", parts[0], err)
 	}
@@ -443,7 +459,12 @@ func fromFilename(filename string) (keyHash KeyHash, mtime int64, expires int64,
 	return keyHash, mtime, expires, sequence, nil
 }
 
-func (c *cache) putEntry(key Key, ttl time.Duration, keepOpen bool, filler Filler) (entry *cacheEntry, file *os.File, err error) {
+func (c *cache[K, KH, KHP]) putEntry(
+	key K,
+	ttl time.Duration,
+	keepOpen bool,
+	filler Filler[K, KH],
+) (entry *cacheEntry[KH], file *os.File, err error) {
 	c.puts.Add(1)
 
 	mtime := time.Now().UnixMilli()
@@ -487,7 +508,7 @@ func (c *cache) putEntry(key Key, ttl time.Duration, keepOpen bool, filler Fille
 	if exists {
 		entry = item
 	} else {
-		entry = &cacheEntry{keyHash: keyHash}
+		entry = &cacheEntry[KH]{keyHash: keyHash}
 	}
 	c.lock.RUnlock()
 
@@ -533,7 +554,7 @@ func readDirWithoutSort(name string) ([]os.DirEntry, error) {
 	return dirs, err
 }
 
-func (c *cache) loadEntries() []error {
+func (c *cache[K, KH, KHP]) loadEntries() []error {
 	shardDirs, err := readDirWithoutSort(c.cacheDir)
 	if err != nil {
 		return []error{err}
@@ -559,7 +580,7 @@ func (c *cache) loadEntries() []error {
 					if !entry.IsDir() {
 						path := filepath.Join(shardDirPath, entry.Name())
 
-						keyHash, mtime, expires, sequence, err := fromFilename(entry.Name())
+						keyHash, mtime, expires, sequence, err := fromFilename[KH, KHP](entry.Name())
 						if err != nil {
 							errsChan <- fmt.Errorf("failed to restore meta from %s: %w", path, err)
 							continue
@@ -571,7 +592,7 @@ func (c *cache) loadEntries() []error {
 							continue
 						}
 
-						ce := &cacheEntry{
+						ce := &cacheEntry[KH]{
 							keyHash:  keyHash,
 							sequence: sequence,
 							size:     info.Size(),
@@ -627,7 +648,7 @@ func (c *cache) loadEntries() []error {
 	return errs
 }
 
-func (c *cache) evict() {
+func (c *cache[K, KH, KHP]) evict() {
 	c.evictionLock.Lock()
 	defer c.evictionLock.Unlock()
 
@@ -641,10 +662,10 @@ func (c *cache) evict() {
 
 	if c.usedSize > c.targetSize {
 
-		var expired []*cacheEntry
+		var expired []*cacheEntry[KH]
 		expiredSize := int64(0)
 
-		var candidates []*cacheEntry
+		var candidates []*cacheEntry[KH]
 		candidatesSize := int64(0)
 
 		for entry := c.last; entry != nil; entry = entry.prev {
@@ -666,7 +687,7 @@ func (c *cache) evict() {
 		c.lock.RUnlock()
 		c.lock.Lock()
 
-		var deleted []*cacheEntry
+		var deleted []*cacheEntry[KH]
 
 		// remove all expired
 		for _, entry := range expired {
